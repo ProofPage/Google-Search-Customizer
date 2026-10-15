@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Search Customizer
 // @namespace    Google Search
-// @version      1.3.0
+// @version      1.3.1
 // @description  Use US Google Search by default, Korean finance results, disable AI Mode, and hide the browser-managed SafeSearch notice safely
 // @author       DumbGPT
 // @match        https://*.google.com/*
@@ -43,7 +43,8 @@
         'xrp',
         'dogecoin',
         'tether',
-        'usdt'
+        'usdt',
+        'coinmarketcap'
     ];
 
     const CRYPTO_KEYWORDS_KO = [
@@ -55,14 +56,17 @@
         '코인가격',
         '알트코인',
         '업비트',
-        '빗썸'
+        '빗썸',
+        '김프',
+        '김치프리미엄',
+        '코인마켓캡'
     ];
 
     const CURRENCY_CODES = new Set([
         'KRW', 'USD', 'JPY', 'EUR', 'GBP', 'CNY', 'RMB', 'AUD', 'CAD', 'CHF',
         'HKD', 'SGD', 'TWD', 'NZD', 'SEK', 'NOK', 'DKK', 'THB', 'VND', 'IDR',
         'MYR', 'PHP', 'INR', 'AED', 'SAR', 'MXN', 'BRL', 'ZAR', 'PLN', 'CZK',
-        'HUF'
+        'HUF', 'TRY'
     ]);
 
     // 일반 IT/개발 또는 일상 단어와 충돌하는 통화 코드 (단독 매칭 제외 및 엄격 검증)
@@ -88,7 +92,8 @@
         '대만달러',
         '페소',
         '바트',
-        '동환율'
+        '동환율',
+        '환전수수료'
     ];
 
     const FX_KEYWORDS_EN = [
@@ -125,7 +130,8 @@
         'kospi',
         'kosdaq',
         'nikkei',
-        'treasury yield'
+        'treasury yield',
+        'fomc'
     ];
 
     const MARKET_KEYWORDS_KO = [
@@ -136,8 +142,14 @@
         '나스닥',
         '다우존스',
         '미국증시',
+        '미국주식',
+        '미장',
+        '국장',
         '국채금리',
-        '목표주가'
+        '기준금리',
+        '목표주가',
+        '배당금',
+        '배당수익률'
     ];
 
     const COMMODITY_PATTERNS = [
@@ -168,18 +180,23 @@
         /\bphp\s*(?:\d|\b(?:array|function|class|code|script|version|laravel|composer|install|manual|tutorial|server|mysql|apache|nginx))\b/i
     ];
 
+    // TRY-catch 프로그래밍 제외 패턴
+    const NON_FINANCE_TRY_PATTERNS = [
+        /\btry\s*(?:catch|finally|except|block|statement)\b/i
+    ];
+
     const KOREAN_COIN_NON_FINANCE_RE =
         /코인\s*(?:세탁|노래방|락커|로커|게임|노래|세탁방|워시|티슈|초콜릿)/u;
 
     const KOREAN_COIN_FINANCE_RE =
         /(?:^|[\s()[\]{},./:+-])코인(?:$|[\s()[\]{},./:+-]|가격|시세|전망|차트|거래|시장|투자|급등)/u;
 
-    // 한국 원화 및 엔화, 외화 금액 패턴 (단위 보강: 만, 억, 달러, 유로 등)
+    // 한국 원화 및 엔화, 외화 금액 패턴 (단위 보강: 만, 억, 달러, 유로, 통화 기호 등)
     const MONEY_AMOUNT_PATTERNS = [
         /(?:^|\s)\d[\d,.]*\s*(?:만\s*|억\s*|조\s*)?원(?![가-힣])/u,
         /(?:^|\s)\d[\d,.]*\s*(?:만\s*|억\s*)?엔(?![가-힣])/u,
         /(?:^|\s)\d[\d,.]*\s*(?:만\s*|억\s*)?(?:달러|유로|파운드|위안)(?![가-힣])/u,
-        /(?:^|\s)\$(?:[\d,.]+)(?:\s*(?:million|billion|trillion))?\b/i
+        /(?:^|\s)[$₩¥€£]\s*(?:[\d,.]+)(?:\s*(?:million|billion|trillion|만|억))?\b/i
     ];
 
     // 6자리 통화쌍 패턴 (예: USDKRW, JPYKRW, EURUSD 등)
@@ -238,7 +255,7 @@
     let isInternalHistoryUpdate = false;
     let preferencesHandled = false;
 
-    // 0ms 즉시 세이프서치 차단 안내 배너를 숨기기 위한 CSS 주입
+    // 0ms 즉시 세이프서치 차단 안내 배너를 숨기기 위한 CSS 주입 (검색 결과 .g / #rso 영역은 엄격 보호)
     function injectAntiSafeSearchNoticeStyle() {
         if (document.getElementById('anti-safesearch-notice-style')) {
             return;
@@ -247,10 +264,12 @@
         const style = document.createElement('style');
         style.id = 'anti-safesearch-notice-style';
         style.textContent = `
-            :has(> a[href*="support.google.com/websearch/answer/9448272"]),
-            :has(> a[href*="support.google.com/websearch/answer/510"]),
-            div:has(a[href*="/websearch/answer/9448272"]):not(#search):not(#rso):not(#center_col):not(body),
-            div:has(a[href*="/websearch/answer/510"]):not(#search):not(#rso):not(#center_col):not(body) {
+            div:has(> a[href*="/websearch/answer/9448272"]):not(#rso *):not(#search *):not(.g *):not(.MjjYud *),
+            div:has(> a[href*="/websearch/answer/510"]):not(#rso *):not(#search *):not(.g *):not(.MjjYud *),
+            #topstuff div:has(a[href*="/websearch/answer/9448272"]),
+            #topstuff div:has(a[href*="/websearch/answer/510"]),
+            #taw div:has(a[href*="/websearch/answer/9448272"]),
+            #taw div:has(a[href*="/websearch/answer/510"]) {
                 display: none !important;
                 visibility: hidden !important;
                 height: 0 !important;
@@ -260,7 +279,14 @@
             }
         `;
 
-        (document.head || document.documentElement).appendChild(style);
+        const target = document.head || document.documentElement;
+        if (target) {
+            target.appendChild(style);
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                (document.head || document.documentElement)?.appendChild(style);
+            }, { once: true });
+        }
     }
 
     function isGoogleHost(hostname = location.hostname) {
@@ -297,6 +323,8 @@
     function normalizeQuery(query) {
         return String(query || '')
             .normalize('NFKC')
+            .replace(/["'`+]/g, ' ')
+            .replace(/\s+/g, ' ')
             .trim();
     }
 
@@ -368,7 +396,7 @@
             .filter((token) => CURRENCY_CODES.has(token));
 
         if (currencyTokens.length > 0) {
-            // 모호한 코드(PHP, CAD 등)만 있는 경우 추가 검증
+            // 모호한 코드(PHP, CAD, TRY 등)만 있는 경우 추가 검증
             const onlyAmbiguous = currencyTokens.every((token) =>
                 AMBIGUOUS_CURRENCY_CODES.has(token)
             );
@@ -378,6 +406,14 @@
                 if (
                     currencyTokens.includes('PHP') &&
                     NON_FINANCE_PHP_PATTERNS.some((pat) => pat.test(normalized))
+                ) {
+                    return false;
+                }
+
+                // TRY 구문 프로그래밍인지 확인
+                if (
+                    currencyTokens.includes('TRY') &&
+                    NON_FINANCE_TRY_PATTERNS.some((pat) => pat.test(normalized))
                 ) {
                     return false;
                 }
@@ -1004,7 +1040,7 @@
         }
     }
 
-    // 검색 폼 제출 시 필요한 파라미터를 미리 주입하여 2중 리다이렉트 지연 제거
+    // 검색 폼 제출 시 필요한 파라미터를 미리 주입하여 2중 리다이렉트 지연 및 파라미터 중복 제거
     function handleSearchFormSubmit(event) {
         const form = event.target;
         if (!(form instanceof HTMLFormElement)) {
@@ -1028,14 +1064,21 @@
         };
 
         for (const [key, value] of Object.entries(paramsToEnsure)) {
-            let input = form.querySelector(`input[name="${key}"]`);
-            if (!input) {
-                input = document.createElement('input');
+            const inputs = Array.from(form.querySelectorAll(`input[name="${key}"]`));
+            if (inputs.length === 0) {
+                const input = document.createElement('input');
                 input.type = 'hidden';
                 input.name = key;
+                input.value = value;
                 form.appendChild(input);
+            } else {
+                inputs[0].value = value;
+                // 중복된 hidden input은 모두 비활성화 및 제거하여 쿼리 오염 방지
+                for (let i = 1; i < inputs.length; i += 1) {
+                    inputs[i].disabled = true;
+                    inputs[i].remove();
+                }
             }
-            input.value = value;
         }
     }
 
@@ -1050,7 +1093,10 @@
 
             if (mutation.type === 'characterData') {
                 if (mutation.target.parentElement) {
-                    inspectSafeSearchSignalElement(mutation.target.parentElement);
+                    const text = mutation.target.parentElement.textContent || '';
+                    if (SAFESEARCH_SIGNAL_RE.test(text)) {
+                        inspectSafeSearchSignalElement(mutation.target.parentElement);
+                    }
                 }
                 continue;
             }
@@ -1058,7 +1104,10 @@
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === Node.TEXT_NODE) {
                     if (node.parentElement) {
-                        inspectSafeSearchSignalElement(node.parentElement);
+                        const text = node.parentElement.textContent || '';
+                        if (SAFESEARCH_SIGNAL_RE.test(text)) {
+                            inspectSafeSearchSignalElement(node.parentElement);
+                        }
                     }
                     continue;
                 }
@@ -1073,7 +1122,13 @@
                 }
 
                 scanAiModeElements(node);
-                scanSafeSearchManagedNotice(node);
+
+                // 세이프서치 관련 텍스트나 링크가 있을 때만 정밀 스캔 수행 (무한 스크롤 성능 낭비 차단)
+                const textContent = node.textContent || '';
+                if (SAFESEARCH_SIGNAL_RE.test(textContent) || node.querySelector('a[href*="/websearch/answer/"]')) {
+                    scanSafeSearchManagedNotice(node);
+                }
+
                 processPreferencesRoot(node);
             }
         }
@@ -1196,3 +1251,4 @@
 
     init();
 })();
+
