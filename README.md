@@ -43,15 +43,12 @@ A lightweight, robust userscript that optimizes your Google Search experience:
 
 ## Installation
 
-### Prerequisites
-Install any popular userscript manager extension in your browser:
-- [Tampermonkey](https://www.tampermonkey.net/) (Recommended)
-- [Violentmonkey](https://violentmonkey.github.io/)
-
-### Install Script
-1. Click the raw script link or copy the contents of [`Google_Search.user.js`](./Google_Search.user.js).
-2. Open your userscript manager dashboard and create a new script.
-3. Paste the code and save (`Ctrl+S`).
+1. Install a userscript manager extension in your browser:
+   - [Violentmonkey](https://violentmonkey.github.io/) (Recommended)
+   - [Tampermonkey](https://www.tampermonkey.net/)
+2. Open the userscript installation URL:
+   - Click to install [`Google_Search.user.js`](https://raw.githubusercontent.com/ProofPage/Google-Search-Customizer/main/Google_Search.user.js).
+3. Confirm the installation prompt in your userscript manager.
 4. Navigate to [Google Search](https://www.google.com) and enjoy customized results!
 
 ---

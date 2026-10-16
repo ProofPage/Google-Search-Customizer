@@ -1,17 +1,22 @@
 // ==UserScript==
 // @name         Google Search Customizer
-// @namespace    Google Search
+// @namespace    https://github.com/ProofPage/Google-Search-Customizer
 // @version      1.3.1
 // @description  Use US Google Search by default, Korean finance results, disable AI Mode, and hide the browser-managed SafeSearch notice safely
-// @author       DumbGPT
+// @author       Page
 // @match        https://*.google.com/*
 // @match        https://*.google.co.kr/*
 // @match        https://*.google.co.jp/*
 // @match        https://*.google.co.uk/*
 // @include      /^https?:\/\/(?:www\.)?google\.(?:[a-z]{2,3}|(?:com|co)\.[a-z]{2})(?::\d+)?(?:\/|$)/
+// @homepageURL  https://github.com/ProofPage/Google-Search-Customizer
+// @supportURL   https://github.com/ProofPage/Google-Search-Customizer/issues
+// @updateURL    https://raw.githubusercontent.com/ProofPage/Google-Search-Customizer/main/Google_Search.user.js
+// @downloadURL  https://raw.githubusercontent.com/ProofPage/Google-Search-Customizer/main/Google_Search.user.js
 // @run-at       document-start
 // @grant        none
 // @noframes
+// @license      MIT
 // ==/UserScript==
 
 (() => {
