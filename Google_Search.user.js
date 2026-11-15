@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Google Search Customizer
 // @namespace    https://github.com/ProofPage/Google-Search-Customizer
-// @version      1.3.1
-// @description  Use US Google Search by default, Korean finance results, disable AI Mode, and hide the browser-managed SafeSearch notice safely
+// @version      1.4.0
+// @description  Use US Google Search by default, Korean finance results, disable AI Mode, normalize title-separator hyphens, and reroute age-gated empty searches to DuckDuckGo
 // @author       Page
 // @match        https://*.google.com/*
 // @match        https://*.google.co.kr/*
@@ -257,8 +257,87 @@
     const hiddenSafeSearchNotices = new WeakSet();
 
     let observer = null;
-    let isInternalHistoryUpdate = false;
     let preferencesHandled = false;
+    let ageGateFallbackHandled = false;
+
+    const AGE_GATE_LINK_SELECTOR = 'a[href*="ageverification.google."]';
+    const SEARCH_RESULT_ITEM_SELECTOR = '#rso .g, #rso .MjjYud, #search .g, #search .MjjYud';
+
+    const NOISE_SUFFIX_PATTERNS = [
+        /\b(?:3d\s+)?adult\s+comics?\b/gi,
+        /\b3d\s+comics?\b/gi
+    ];
+
+    function buildAgeGateFallbackUrl(rawQuery) {
+        let cleanedQuery = sanitizeSeparatorHyphens(rawQuery).trim();
+        for (const pattern of NOISE_SUFFIX_PATTERNS) {
+            const stripped = cleanedQuery.replace(pattern, ' ').replace(/\s{2,}/g, ' ').trim();
+            if (stripped) {
+                cleanedQuery = stripped;
+            }
+        }
+        if (!cleanedQuery) {
+            return null;
+        }
+
+        const fallbackUrl = new URL('https://duckduckgo.com/');
+        fallbackUrl.searchParams.set('q', cleanedQuery);
+        fallbackUrl.searchParams.set('kp', '-2');
+        fallbackUrl.searchParams.set('kl', 'us-en');
+        fallbackUrl.searchParams.set('ia', 'web');
+        return fallbackUrl.href;
+    }
+
+    function hasAgeVerificationGate(root = document) {
+        if (!root || typeof root.querySelector !== 'function') {
+            return false;
+        }
+
+        if (root.querySelector(AGE_GATE_LINK_SELECTOR)) {
+            return true;
+        }
+
+        if (typeof root.querySelectorAll !== 'function') {
+            return false;
+        }
+
+        for (const link of root.querySelectorAll('a[href]')) {
+            const href = link.getAttribute?.('href') || link.href || '';
+            if (href.includes('ageverification.google.')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function hasRenderedSearchResults(root = document) {
+        if (!root || typeof root.querySelector !== 'function') {
+            return false;
+        }
+        return Boolean(root.querySelector(SEARCH_RESULT_ITEM_SELECTOR));
+    }
+
+    // 한국 IP에서 성인인증으로 검색 결과가 0건 차단된 경우 안전검색 해제된 DuckDuckGo로 자동 우회
+    function checkAndRerouteAgeGatedEmptySearch() {
+        if (ageGateFallbackHandled || !isGoogleHost() || !isSearchPath(location.pathname)) {
+            return false;
+        }
+
+        const query = getSearchQuery();
+        if (!query || !hasAgeVerificationGate(document) || hasRenderedSearchResults(document)) {
+            return false;
+        }
+
+        const fallbackHref = buildAgeGateFallbackUrl(query);
+        if (!fallbackHref) {
+            return false;
+        }
+
+        ageGateFallbackHandled = true;
+        location.replace(fallbackHref);
+        return true;
+    }
 
     // 0ms 즉시 세이프서치 차단 안내 배너를 숨기기 위한 CSS 주입 (검색 결과 .g / #rso 영역은 엄격 보호)
     function injectAntiSafeSearchNoticeStyle() {
@@ -323,6 +402,18 @@
 
     function getSearchQuery(url = new URL(location.href)) {
         return url.searchParams.get('q') || '';
+    }
+
+    // 제목 구분용 공백 하이픈("A - B")이 검색 엔진에서 제외 연산자(-B)로 오작동하는 현상 방지
+    function sanitizeSeparatorHyphens(query) {
+        const raw = String(query || '');
+        if (!/\s+[-–—]\s+/.test(raw)) {
+            return raw;
+        }
+        return raw
+            .replace(/\s+[-–—]\s+/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
     }
 
     function normalizeQuery(query) {
@@ -523,8 +614,14 @@
         }
 
         let changed = false;
-        const query = getSearchQuery(url);
-        const region = getSearchRegion(query);
+        const rawQuery = getSearchQuery(url);
+        const sanitizedQuery = sanitizeSeparatorHyphens(rawQuery);
+        if (sanitizedQuery !== rawQuery) {
+            url.searchParams.set('q', sanitizedQuery);
+            changed = true;
+        }
+
+        const region = getSearchRegion(sanitizedQuery);
 
         changed = setParam(url, 'gl', region) || changed;
         changed = setParam(url, 'hl', CONFIG.uiLanguage) || changed;
@@ -620,8 +717,8 @@
         };
     }
 
-    // 최초 로드 시 URL 정규화 (하드 리다이렉트 허용)
-    function normalizeCurrentUrlInitial() {
+    // 지역 설정은 주소만 바꿔서는 결과에 반영되지 않으므로 새 검색 요청이 필요함
+    function normalizeCurrentUrl() {
         if (!isGoogleHost()) {
             return false;
         }
@@ -635,41 +732,6 @@
 
         location.replace(url.href);
         return true;
-    }
-
-    // SPA 히스토리 변경 시 URL 정규화 (페이지 새로고침 없이 history.replaceState로 부드럽게 동기화)
-    function syncUrlParametersSilently() {
-        if (!isGoogleHost() || isInternalHistoryUpdate) {
-            return;
-        }
-
-        const current = new URL(location.href);
-
-        // AI 모드로 진입한 경우에는 강제 변환 리다이렉트
-        if (isAiModeUrl(current)) {
-            const { url, changed } = convertAiModeUrl(current, true);
-            if (changed && url.href !== current.href) {
-                location.replace(url.href);
-            }
-            return;
-        }
-
-        if (!isSearchPath(current.pathname)) {
-            return;
-        }
-
-        const { url, changed } = buildNormalizedUrl(current, false);
-
-        if (changed && url.href !== current.href) {
-            try {
-                isInternalHistoryUpdate = true;
-                history.replaceState(history.state, '', url.href);
-            } catch {
-                // history 조작 불가 환경 무시
-            } finally {
-                isInternalHistoryUpdate = false;
-            }
-        }
     }
 
     function getElementUrl(element) {
@@ -1058,6 +1120,12 @@
         }
 
         const qInput = form.querySelector('input[name="q"], textarea[name="q"]');
+        if (qInput && typeof qInput.value === 'string') {
+            const sanitized = sanitizeSeparatorHyphens(qInput.value);
+            if (sanitized !== qInput.value) {
+                qInput.value = sanitized;
+            }
+        }
         const query = qInput ? normalizeQuery(qInput.value) : '';
         const region = getSearchRegion(query);
 
@@ -1134,6 +1202,10 @@
                     scanSafeSearchManagedNotice(node);
                 }
 
+                if (node.querySelector?.(AGE_GATE_LINK_SELECTOR)) {
+                    checkAndRerouteAgeGatedEmptySearch();
+                }
+
                 processPreferencesRoot(node);
             }
         }
@@ -1186,13 +1258,13 @@
             history[method] = function (...args) {
                 const result = original.apply(this, args);
 
-                if (!isInternalHistoryUpdate) {
-                    queueMicrotask(() => {
-                        syncUrlParametersSilently();
-                        scanAiModeElements(document);
-                        scanSafeSearchManagedNotice(document);
-                    });
-                }
+                queueMicrotask(() => {
+                    if (!normalizeCurrentUrl()) {
+                        checkAndRerouteAgeGatedEmptySearch();
+                    }
+                    scanAiModeElements(document);
+                    scanSafeSearchManagedNotice(document);
+                });
 
                 return result;
             };
@@ -1201,6 +1273,9 @@
 
     function initializeDomHandling() {
         injectAntiSafeSearchNoticeStyle();
+        if (checkAndRerouteAgeGatedEmptySearch()) {
+            return;
+        }
         scanAiModeElements(document);
         scanSafeSearchManagedNotice(document);
         processPreferencesRoot(document);
@@ -1216,7 +1291,7 @@
         injectAntiSafeSearchNoticeStyle();
 
         // 첫 진입 시 하드 리다이렉트가 발생하면 즉시 종료
-        if (normalizeCurrentUrlInitial()) {
+        if (normalizeCurrentUrl()) {
             return;
         }
 
@@ -1228,15 +1303,15 @@
         // 검색 폼 제출 시 파라미터 사전 주입 (2중 리다이렉트 지연 방지)
         document.addEventListener('submit', handleSearchFormSubmit, true);
 
-        // 뒤로가기/앞으로가기 및 해시 변경 시 파라미터 동기화
+        // 뒤로가기/앞으로가기 및 페이지 복원 시에도 실제 검색 요청에 설정 반영
         window.addEventListener('popstate', () => {
-            syncUrlParametersSilently();
+            normalizeCurrentUrl();
             scanAiModeElements(document);
             scanSafeSearchManagedNotice(document);
         }, false);
 
         window.addEventListener('pageshow', () => {
-            syncUrlParametersSilently();
+            normalizeCurrentUrl();
             scanAiModeElements(document);
             scanSafeSearchManagedNotice(document);
         }, false);

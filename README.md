@@ -1,18 +1,19 @@
 # Google Search Customizer
 
 A lightweight, robust userscript that optimizes your Google Search experience:
-- **Default US Search Region (`gl=US`)**: Get comprehensive, global search results without local geo-bias.
+- **Default US Search Region (`gl=US`)**: Request US-ranked search results. This does not change your IP address or Google's detected location.
 - **Intelligent Korean Finance Routing (`gl=KR`)**: Automatically detects currency exchange rates, stocks, crypto, and commodities to deliver fast, relevant Korean domestic financial widgets and quotes.
-- **Bypass AI Mode / AI Overview (`udm=50`)**: Strips forced AI-generated tabs and redirects to clean, direct web search results (`udm=14`).
+- **Bypass AI Mode (`udm=50`)**: Redirects AI Mode to direct web search results (`udm=14`). AI Overviews in ordinary search are not removed.
 - **Zero-Latency SafeSearch Banner Removal**: Instantly eliminates annoying "SafeSearch is managed by your browser/network" warning notices using pure CSS `:has()` pseudo-classes with zero layout shift (CLS) or visual flicker.
-- **Flicker-Free SPA Integration**: Fully compatible with Google's dynamic Single Page Application (SPA) navigation—no infinite reload loops, input interruptions, or focus drops while typing.
+- **SPA Search Policy Enforcement**: Reissues a search when Google's dynamic navigation omits the requested settings, rather than changing only the address bar.
+- **Title Hyphen Sanitization & Age-Gate Fallback**: Strips spaced title separators (` - `) so search engines do not treat them as exclusion operators (`-term`), and automatically reroutes to DuckDuckGo (`kp=-2`, US English) when Korean IP age verification blocks all Google results.
 
 ---
 
 ## Features
 
 ### 1. Smart Regional Routing
-- **Default**: Queries are routed with `gl=US` (United States region) and `hl=ko` (Korean UI language), preventing unwanted country-level filtering while keeping the interface comfortable.
+- **Default**: Queries request `gl=US` (United States region) and `hl=ko` (Korean UI language). Regional legal restrictions and account requirements still apply.
 - **Finance Automatic Switch**: When searching for financial queries, the script seamlessly routes to `gl=KR` so you instantly see domestic exchange rates (e.g., KRW/USD, KRW/JPY), Korean stock indices (KOSPI, KOSDAQ), and local crypto prices.
 
 #### Intelligent Query Detection
@@ -34,9 +35,11 @@ A lightweight, robust userscript that optimizes your Google Search experience:
 - Browser- or network-managed SafeSearch banners ("Your browser is managing SafeSearch settings") are hidden **immediately at `document-start`** via CSS rules leveraging `:has()`.
 - No visual flashing (FOUC) and no DOM performance penalties compared to legacy text-scanning observers.
 - Protected selectors ensure actual search results and main containers are never accidentally hidden.
+- Hiding a notice does not disable a filter, unlock managed settings, or satisfy age verification. `safe=off` is a request, not a guarantee; Google can enforce account, network, or regional restrictions.
 
-### 4. Seamless SPA (Single-Page Application) Experience
-- Hooks into Google's client-side history navigation (`pushState` / `replaceState`) without causing full-page reloads (`location.replace`).
+### 4. SPA (Single-Page Application) Navigation
+- Checks Google's client-side history navigation (`pushState` / `replaceState`), back/forward navigation, and page restoration.
+- When search settings differ from the policy, `location.replace` requests results with the corrected settings. Already-correct URLs do not reload.
 - Automatically enriches query parameters (`gl`, `hl`, `safe=off`, `pws=0`) directly inside search forms upon submission, eliminating double-loading delays.
 
 ---
@@ -51,6 +54,10 @@ A lightweight, robust userscript that optimizes your Google Search experience:
 3. Confirm the installation prompt in your userscript manager.
 4. Navigate to [Google Search](https://www.google.com) and enjoy customized results!
 
+For Tampermonkey 5.3+ in Chrome-based browsers, enable **Allow User Scripts** in the extension settings (Chrome 138+) or enable **Developer Mode**. See the [official permission instructions](https://www.tampermonkey.net/faq.php?q=Q209).
+
+If Google asks for age verification, use Google's official account verification flow. This userscript does not bypass verification or managed SafeSearch restrictions. See [Google's SafeSearch troubleshooting](https://support.google.com/websearch/answer/9448272).
+
 ---
 
 ## URL Parameters Handled
@@ -59,9 +66,9 @@ A lightweight, robust userscript that optimizes your Google Search experience:
 | :--- | :--- | :--- |
 | `gl` | `US` or `KR` | Enforces United States results by default, switching to Korea for financial queries. |
 | `hl` | `ko` | Sets the interface language to Korean. |
-| `safe` | `off` | Disables SafeSearch filtering. |
+| `safe` | `off` | Requests SafeSearch off; enforced restrictions can override this request. |
 | `pws` | `0` | Disables personalized search history bias. |
-| `udm` | `14` | Redirects AI Overview / AI Mode to clean web results when triggered. |
+| `udm` | `14` | Redirects AI Mode to web results when triggered. |
 
 ---
 
@@ -78,3 +85,11 @@ A lightweight, robust userscript that optimizes your Google Search experience:
 ## License
 
 This project is licensed under the [MIT License](./LICENSE).
+
+## Tests
+
+With Node.js 22 or later:
+
+```sh
+node --test Google_Search.test.cjs
+```
