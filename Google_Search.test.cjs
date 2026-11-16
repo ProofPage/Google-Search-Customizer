@@ -29,7 +29,10 @@ function createBrowser(options = {}) {
             if (selector.includes('ageverification') && ageGateAnchors.length > 0) {
                 return ageGateAnchors[0];
             }
-            if ((selector.includes('#rso') || selector.includes('.g')) && results.length > 0) {
+            if ((selector === '#topstuff' || selector === '#center_col' || selector === '#main') && options.ageGateText) {
+                return { textContent: options.ageGateText };
+            }
+            if ((selector.includes('#rso') || selector.includes('.g') || selector.includes('#islrg')) && results.length > 0) {
                 return results[0];
             }
             return null;
@@ -166,5 +169,15 @@ test('spaced title hyphens are normalized so minus operators do not exclude resu
 
     assert.deepEqual(blockedBrowser.requests, [
         'https://duckduckgo.com/?q=Midoriko+Kobayashi+Obsession+4&kp=-2&kl=us-en&ia=web'
+    ]);
+
+    const blockedImagesBrowser = createBrowser({
+        url: 'https://www.google.com/search?q=Midoriko+Kobayashi+Obsession+4+3D+Adult+Comic&udm=2&gl=US&hl=ko&safe=off&pws=0',
+        ageGateText: '청소년에게 유해한 결과는 제외되었습니다. 만 19세 이상의 사용자는 성인인증을 통해 모든 결과를 볼 수 있습니다.',
+        resultCount: 0
+    });
+
+    assert.deepEqual(blockedImagesBrowser.requests, [
+        'https://duckduckgo.com/?q=Midoriko+Kobayashi+Obsession+4&kp=-2&kl=us-en&ia=images&iax=images'
     ]);
 });

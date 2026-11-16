@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Search Customizer
 // @namespace    https://github.com/ProofPage/Google-Search-Customizer
-// @version      1.4.0
+// @version      1.4.1
 // @description  Use US Google Search by default, Korean finance results, disable AI Mode, normalize title-separator hyphens, and reroute age-gated empty searches to DuckDuckGo
 // @author       Page
 // @match        https://*.google.com/*
@@ -258,17 +258,32 @@
 
     let observer = null;
     let preferencesHandled = false;
-    let ageGateFallbackHandled = false;
+    let ageGateFallbackUrlChecked = '';
 
     const AGE_GATE_LINK_SELECTOR = 'a[href*="ageverification.google."]';
-    const SEARCH_RESULT_ITEM_SELECTOR = '#rso .g, #rso .MjjYud, #search .g, #search .MjjYud';
+    const AGE_GATE_TEXT_RE =
+        /(?:만\s*19세\s*이상의\s*사용자는\s*성인인증을\s*통해|청소년에게\s*유해한\s*결과는\s*제외되었습니다|removed\s+for\s+minors\s+under\s*19)/i;
+    const SEARCH_RESULT_ITEM_SELECTOR = '#rso a[href] h3, #search a[href] h3, #rso .g h3, #search .g h3';
+    const IMAGE_RESULT_ITEM_SELECTOR = '#islrg [data-id] img, #search [data-ri] img, #rso img[data-src], #rso img[src^="http"]';
 
     const NOISE_SUFFIX_PATTERNS = [
         /\b(?:3d\s+)?adult\s+comics?\b/gi,
         /\b3d\s+comics?\b/gi
     ];
 
-    function buildAgeGateFallbackUrl(rawQuery) {
+    function getFallbackModeParams(currentUrl = new URL(location.href)) {
+        const udm = currentUrl.searchParams.get('udm');
+        const tbm = currentUrl.searchParams.get('tbm');
+        if (udm === '2' || tbm === 'isch') {
+            return { ia: 'images', iax: 'images' };
+        }
+        if (udm === '7' || udm === 'vids' || tbm === 'vid') {
+            return { ia: 'videos', iax: 'videos' };
+        }
+        return { ia: 'web', iax: null };
+    }
+
+    function buildAgeGateFallbackUrl(rawQuery, currentUrl = new URL(location.href)) {
         let cleanedQuery = sanitizeSeparatorHyphens(rawQuery).trim();
         for (const pattern of NOISE_SUFFIX_PATTERNS) {
             const stripped = cleanedQuery.replace(pattern, ' ').replace(/\s{2,}/g, ' ').trim();
@@ -284,7 +299,11 @@
         fallbackUrl.searchParams.set('q', cleanedQuery);
         fallbackUrl.searchParams.set('kp', '-2');
         fallbackUrl.searchParams.set('kl', 'us-en');
-        fallbackUrl.searchParams.set('ia', 'web');
+        const mode = getFallbackModeParams(currentUrl);
+        fallbackUrl.searchParams.set('ia', mode.ia);
+        if (mode.iax) {
+            fallbackUrl.searchParams.set('iax', mode.iax);
+        }
         return fallbackUrl.href;
     }
 
@@ -297,13 +316,19 @@
             return true;
         }
 
-        if (typeof root.querySelectorAll !== 'function') {
-            return false;
+        if (typeof root.querySelectorAll === 'function') {
+            for (const link of root.querySelectorAll('a[href]')) {
+                const href = link.getAttribute?.('href') || link.href || '';
+                if (href.includes('ageverification.google.')) {
+                    return true;
+                }
+            }
         }
 
-        for (const link of root.querySelectorAll('a[href]')) {
-            const href = link.getAttribute?.('href') || link.href || '';
-            if (href.includes('ageverification.google.')) {
+        for (const selector of ['#topstuff', '#center_col', '#main']) {
+            const container = root.querySelector(selector);
+            const text = container?.textContent || '';
+            if (AGE_GATE_TEXT_RE.test(text)) {
                 return true;
             }
         }
@@ -311,30 +336,73 @@
         return false;
     }
 
-    function hasRenderedSearchResults(root = document) {
+    function hasRenderedSearchResults(root = document, currentUrl = new URL(location.href)) {
         if (!root || typeof root.querySelector !== 'function') {
             return false;
         }
+
+        const mode = getFallbackModeParams(currentUrl);
+        if (mode.ia === 'images') {
+            return Boolean(root.querySelector(IMAGE_RESULT_ITEM_SELECTOR));
+        }
+
         return Boolean(root.querySelector(SEARCH_RESULT_ITEM_SELECTOR));
+    }
+
+    function injectPartialAgeGateButton(rawQuery, currentUrl) {
+        if (!document || typeof document.getElementById !== 'function' || typeof document.createElement !== 'function') {
+            return;
+        }
+        if (document.getElementById('gsc-ddg-fallback-link')) {
+            return;
+        }
+
+        const ageLink = document.querySelector(AGE_GATE_LINK_SELECTOR);
+        const parent = ageLink?.parentElement;
+        if (!parent) {
+            return;
+        }
+
+        const fallbackHref = buildAgeGateFallbackUrl(rawQuery, currentUrl);
+        if (!fallbackHref) {
+            return;
+        }
+
+        const link = document.createElement('a');
+        link.id = 'gsc-ddg-fallback-link';
+        link.href = fallbackHref;
+        link.textContent = 'DuckDuckGo(안전검색 해제)에서 전체 결과 보기';
+        link.style.cssText = 'display:inline-block;margin-left:10px;padding:4px 10px;border-radius:16px;background:#de5833;color:#fff;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle;';
+        parent.appendChild(link);
     }
 
     // 한국 IP에서 성인인증으로 검색 결과가 0건 차단된 경우 안전검색 해제된 DuckDuckGo로 자동 우회
     function checkAndRerouteAgeGatedEmptySearch() {
-        if (ageGateFallbackHandled || !isGoogleHost() || !isSearchPath(location.pathname)) {
+        if (!isGoogleHost() || !isSearchPath(location.pathname)) {
             return false;
         }
 
-        const query = getSearchQuery();
-        if (!query || !hasAgeVerificationGate(document) || hasRenderedSearchResults(document)) {
+        const currentUrl = new URL(location.href);
+        if (ageGateFallbackUrlChecked === currentUrl.href) {
             return false;
         }
 
-        const fallbackHref = buildAgeGateFallbackUrl(query);
+        const query = getSearchQuery(currentUrl);
+        if (!query || !hasAgeVerificationGate(document)) {
+            return false;
+        }
+
+        if (hasRenderedSearchResults(document, currentUrl)) {
+            injectPartialAgeGateButton(query, currentUrl);
+            return false;
+        }
+
+        const fallbackHref = buildAgeGateFallbackUrl(query, currentUrl);
         if (!fallbackHref) {
             return false;
         }
 
-        ageGateFallbackHandled = true;
+        ageGateFallbackUrlChecked = currentUrl.href;
         location.replace(fallbackHref);
         return true;
     }
@@ -1202,7 +1270,7 @@
                     scanSafeSearchManagedNotice(node);
                 }
 
-                if (node.querySelector?.(AGE_GATE_LINK_SELECTOR)) {
+                if (node.matches?.(AGE_GATE_LINK_SELECTOR) || node.querySelector?.(AGE_GATE_LINK_SELECTOR)) {
                     checkAndRerouteAgeGatedEmptySearch();
                 }
 
@@ -1305,13 +1373,17 @@
 
         // 뒤로가기/앞으로가기 및 페이지 복원 시에도 실제 검색 요청에 설정 반영
         window.addEventListener('popstate', () => {
-            normalizeCurrentUrl();
+            if (!normalizeCurrentUrl()) {
+                checkAndRerouteAgeGatedEmptySearch();
+            }
             scanAiModeElements(document);
             scanSafeSearchManagedNotice(document);
         }, false);
 
         window.addEventListener('pageshow', () => {
-            normalizeCurrentUrl();
+            if (!normalizeCurrentUrl()) {
+                checkAndRerouteAgeGatedEmptySearch();
+            }
             scanAiModeElements(document);
             scanSafeSearchManagedNotice(document);
         }, false);
